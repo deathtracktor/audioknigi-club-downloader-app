@@ -21,7 +21,8 @@ git clone https://github.com/deathtracktor/audioknigi-club-downloader-app.git sr
 ```
 scripts\pip install -r src\requirements.txt
 ```
-
+* Download [Geckodriver](https://github.com/mozilla/geckodriver/releases), extract to your current working directory.
+* Make sure you have the recent version of Firefox installed.
 * Run the app:
 ```
 cd src
