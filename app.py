@@ -1,37 +1,69 @@
 """
     Download complete audio books from audioknigi.ru
 """
+import contextlib
+import json
 import re
-import requests
 import sys
-from bs4 import BeautifulSoup
+
+import requests
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 
-CHAPTERS_URL = 'https://audioknigi.club/rest/bid/{}'
 USAGE_HELP = '''
     Audioknigi.club book downloader.
     Usage: {0} <url>
         url: a URL of a multi-part audio book.
 '''
 
-def get_book_id(url):
-    """Get internal book ID."""
-    resp = requests.get(url)
-    soup = BeautifulSoup(resp.content, 'html.parser')
-    player = re.compile(r'audioPlayer\((.*)\,')
-    script_code = next(filter(lambda el: player.search(el.text), soup.findAll('script')))
-    return player.search(str(script_code)).group(1)
+AJAX_ON_SUCCESS = '''
+    $(document).ajaxSuccess(function(event, xhr, opt) {
+        if (opt.url.indexOf('ajax/bid') !== -1) {
+            $('body').html($('<div />', {
+                id: 'playlist',
+                text: JSON.parse(xhr.responseText).aItems
+            }))
+        }
+    });
+'''
 
-    
-def get_chapters(book_id):
-    """Get chapter info."""
-    for chapter in requests.get(CHAPTERS_URL.format(book_id)).json():
-        yield chapter['title'], chapter['mp3']
+INIT_PLAYER = '$(document).audioPlayer({}, 0)'
+
+
+@contextlib.contextmanager
+def open_browser(url):
+    """Open a web page with Selenium."""
+    if getattr(sys, 'frozen', False):
+        tmp_path = getattr(sys, '_MEIPASS')
+        os.environ['PATH'] += os.pathsep + tmp_path
+    browser = webdriver.Firefox()
+    browser.get(url)
+    yield browser
+    browser.close()
+
+
+def get_book_id(html):
+    """Get the internal book ID."""
+    player = re.compile(r'audioPlayer\((.*)\,')
+    return player.search(html).group(1)
+
+
+def get_playist(browser, book_id):
+    """Extract the playlist."""
+    browser.execute_script(AJAX_ON_SUCCESS)
+    browser.execute_script(INIT_PLAYER.format(book_id))
+    playlist_loaded = EC.presence_of_element_located((By.ID, 'playlist'))
+    element = WebDriverWait(browser, 60).until(playlist_loaded)
+    return tuple((track['mp3'], track['title']) for track in json.loads(element.text))
 
 
 def download_chapter(url):
     """Download a chapter."""
     return requests.get(url).content
+
 
 # start the app
 if __name__ == '__main__':
@@ -39,13 +71,16 @@ if __name__ == '__main__':
     if len(sys.argv) != 2:
         print(USAGE_HELP.format(*sys.argv))
         sys.exit(1)
-    
+
     book_url = sys.argv[1]
-        
-    for fname, url in get_chapters(get_book_id(book_url)):
-        print('Downloading chapter {}'.format(fname))
+
+    with open_browser(book_url) as browser:
+        book_id = get_book_id(browser.page_source)
+        playlist = get_playist(browser, book_id)
+
+    for url, fname in playlist:
+        print('Downloading chapter "{}"'.format(fname))
         with open('{}.mp3'.format(fname), 'wb') as outfile:
             outfile.write(download_chapter(url))
-            
-    print('All done.')
 
+    print('All done.')

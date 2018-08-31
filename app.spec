@@ -4,8 +4,8 @@ block_cipher = None
 
 
 a = Analysis(['app.py'],
-             pathex=['C:\\Users\\danila\\OneDrive\\downloader\\src'],
-             binaries=[],
+             pathex=['.'],
+             binaries=[('geckodriver.exe', '.')],
              datas=[],
              hiddenimports=[],
              hookspath=[],
