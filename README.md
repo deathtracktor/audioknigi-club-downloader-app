@@ -7,6 +7,7 @@ Download multi-part audio books from Audioknigi.club
 * pip (https://pip.pypa.io/en/stable/installing/)
 * virtualenv (https://pypi.python.org/pypi/virtualenv)
 * git client (ftp://git.narod.ru)
+* Firefox web browser.
 
 ## Installation (Windows)
 
@@ -21,7 +22,8 @@ git clone https://github.com/deathtracktor/audioknigi-club-downloader-app.git sr
 ```
 scripts\pip install -r src\requirements.txt
 ```
-
+* Download [Geckodriver](https://github.com/mozilla/geckodriver/releases), extract to your current working directory.
+* Make sure you have the recent version of Firefox installed.
 * Run the app:
 ```
 cd src
@@ -32,9 +34,6 @@ scripts\python app.py
 cd src
 pyinstaller app.spec --onefile
 ```
-NB: the current version of PyInstaller (3.2.1) is broken. Use development version instead:
-```
-pip install https://github.com/pyinstaller/pyinstaller/archive/develop.tar.gz
-```
+NB: A precompiled Windows 64-bit executable can be found [here](dist/app.exe).
 
-Enjoy!
+## Enjoy!

@@ -1,3 +1,6 @@
-bs4==0.0.1
-requests==2.18.4
-PyInstaller==3.3
+click==8.0.1
+pyinstaller==4.3
+pathvalidate==0.29.0
+requests==2.25.1
+selenium==3.141.0
+selenium-wire==4.3.1
