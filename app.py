@@ -63,6 +63,7 @@ def download_chapter(url):
     return requests.get(url).content
 
 def yes_or_no(question):
+    """Prompt user for a y/n answer"""
     while "the answer is invalid":
         reply = str(input(question+' (y/n): ')).lower().strip()
         if reply[:1] == 'y':
@@ -98,19 +99,30 @@ if __name__ == '__main__':
     if args.outputDir is None:
         args.outputDir = args.audioBookURL.split('/')[-1]
 
-    #create directory if required
-    if not os.path.exists(os.path.abspath(args.outputDir)):
-      print ("Creating directory <{}>".format(os.path.abspath(args.outputDir)))
-      os.makedirs(os.path.abspath(args.outputDir))
+    fullPathDir = os.path.abspath(args.outputDir)
 
-    if (os.listdir(os.path.abspath(args.outputDir)) and not args.overwrite):
-        if not yes_or_no('Directory <{}> exists. Overwrite?'.format(os.path.abspath(args.outputDir))):
-          sys.exit(1)
+    #Check outputDir
+    if os.path.exists(fullPathDir):
+        #outputDir Exists
+        if not os.path.isdir(fullPathDir):
+            #outputPath is not a directory
+            print("{} exists, and is not a directory!".format(fullPathDir))
+            exit(1)
+        elif os.listdir(fullPathDir) and not args.overwrite:
+            #outputPath is a directory, is not empty and overwrite flag is off
+            if not yes_or_no('Directory <{}> exists. Overwrite?'.format(fullPathDir)):
+                #Prompt for overwrite returned NO
+                sys.exit(1)
+            else:
+                #Prompt for overwrite returned YES
+                print("overwriting files in <{}>\n".format(fullPathDir))
     else:
-        print("overwriting files in <{}>\n".format(os.path.abspath(args.outputDir)))
+      #outputDir does not exist - create directory
+      print("Creating directory <{}>".format(fullPathDir))
+      os.makedirs(fullPathDir)
 
     print("\nDownloading audiobook from {} to <{}>\n".format(args.audioBookURL,
-                                                           os.path.abspath(args.outputDir)))
+                                                           fullPathDir))
 
     try:
         with open_browser(args.audioBookURL) as browser:
@@ -119,7 +131,7 @@ if __name__ == '__main__':
 
         for url, fname in playlist:
             print('Downloading chapter "{}"'.format(fname))
-            with open('{}.mp3'.format(os.path.join(os.path.abspath(args.outputDir),fname)), 'wb') as outfile:
+            with open('{}.mp3'.format(os.path.join(fullPathDir,fname)), 'wb') as outfile:
                 outfile.write(download_chapter(url))
 
         print('All done\n')
@@ -127,12 +139,12 @@ if __name__ == '__main__':
     except Exception as e:
       #remove previously created directory
       if (args.cleanup or
-          (os.listdir(os.path.abspath(args.outputDir)) and
+          (os.listdir(fullPathDir) and
            yes_or_no('Error encountered. Remove Audiobook directory?')
           )
          ):
-          print("Deleting directory <{}>\n".format(os.path.abspath(args.outputDir)))
-          shutil.rmtree(os.path.abspath(args.outputDir))
+          print("Deleting directory <{}>\n".format(fullPathDir))
+          shutil.rmtree(fullPathDir)
 
       #raise the same exception to print the error
       raise e
