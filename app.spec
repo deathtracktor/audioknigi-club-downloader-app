@@ -2,10 +2,11 @@
 
 block_cipher = None
 
+import sys
 
 a = Analysis(['app.py'],
              pathex=['.'],
-             binaries=[('geckodriver.exe', '.')],
+             binaries=[('geckodriver'+('.exe' if sys.platform == "windows" else ''), '.')],
              datas=[],
              hiddenimports=[],
              hookspath=[],
