@@ -16,6 +16,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+import click
 
 AJAX_ON_SUCCESS = '''
     $(document).ajaxSuccess(function(event, xhr, opt) {
@@ -62,89 +63,78 @@ def download_chapter(url):
     """Download a chapter."""
     return requests.get(url).content
 
-def yes_or_no(question):
-    """Prompt user for a y/n answer"""
-    while "the answer is invalid":
-        reply = str(input(question+' (y/n): ')).lower().strip()
-        if reply[:1] == 'y':
-            return True
-        if reply[:1] == 'n':
-            return False
+def get_audiobook_name(url):
+    """
+    Extract the audiobook name from its url
+    """
+    return url.split('/')[-1]
 
-# start the app
-if __name__ == '__main__':
-
-    #set up command-line arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-o', '--outputDir',
-                        help='Directory the AudioBook will be dowloaded to. Default: <AudioBookName>',
-                        metavar='OutputDirectory',
-                        type=str)
-    parser.add_argument('audioBookURL',
-                        help='a URL of a multi-part audio book',
-                        metavar='URL')
-    parser.add_argument('-w', '--overwrite',
-                        help='overwrite existing directory without asking',
-                        action='store_true',
-                        default=False)
-    parser.add_argument('-c', '--cleanup',
-                        help='delete outputDir in case of errors',
-                        action='store_true',
-                        default=False)
-
-    #parse arguments
-    args = parser.parse_args()
-
-    #default value for output dir is the book name
-    if args.outputDir is None:
-        args.outputDir = args.audioBookURL.split('/')[-1]
-
-    fullPathDir = os.path.abspath(args.outputDir)
+def get_full_dirname(dirname, doOverwrite):
+    """
+    Return absolute path for dirname, and check for existence
+    if dirname exists and is not a directory - raise and exception
+    if exists and not empty - prompt before overwriting unless doOverwrite is True
+    """
+    fullPathDir = os.path.abspath(dirname)
 
     #Check outputDir
     if os.path.exists(fullPathDir):
         #outputDir Exists
         if not os.path.isdir(fullPathDir):
             #outputPath is not a directory
-            print("{} exists, and is not a directory!".format(fullPathDir))
+            click.echo("\n{} exists, and is not a directory!\n".format(fullPathDir))
             exit(1)
-        elif os.listdir(fullPathDir) and not args.overwrite:
+        elif os.listdir(fullPathDir) and not doOverwrite:
             #outputPath is a directory, is not empty and overwrite flag is off
-            if not yes_or_no('Directory <{}> exists. Overwrite?'.format(fullPathDir)):
+            if not click.confirm('\nDirectory <{}> exists. Overwrite?'.format(fullPathDir)):
                 #Prompt for overwrite returned NO
                 sys.exit(1)
             else:
                 #Prompt for overwrite returned YES
-                print("overwriting files in <{}>\n".format(fullPathDir))
+                click.echo("overwriting files in <{}>\n".format(fullPathDir))
     else:
       #outputDir does not exist - create directory
-      print("Creating directory <{}>".format(fullPathDir))
+      click.echo("Creating directory <{}>".format(fullPathDir))
       os.makedirs(fullPathDir)
 
-    print("\nDownloading audiobook from {} to <{}>\n".format(args.audioBookURL,
-                                                           fullPathDir))
+    return fullPathDir
 
-    try:
-        with open_browser(args.audioBookURL) as browser:
-              book_id = get_book_id(browser.page_source)
-              playlist = get_playist(browser, book_id)
+CLICK_CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+@click.command(context_settings=CLICK_CONTEXT_SETTINGS)
+@click.option('-o', '--outputDir', 'outputDir',
+              default=None,
+              help="Directory the AudioBook will be dowloaded to. Default: <AudioBookName>")
+@click.option('-w', '--overwrite', 'doOverwrite',
+              is_flag=True,
+              help="Overwrite existing audiobook directory without asking")
+@click.option('-u', '--url', 'audio_book_url',
+              prompt="\nURL of the audiobook",
+              help="a URL of a multi-part audio book")
+def downloader_main(outputDir, doOverwrite, audio_book_url):
 
-        for url, fname in playlist:
-            print('Downloading chapter "{}"'.format(fname))
-            with open('{}.mp3'.format(os.path.join(fullPathDir,fname)), 'wb') as outfile:
-                outfile.write(download_chapter(url))
+    if outputDir is None:
+      outputDir = get_audiobook_name(audio_book_url)
 
-        print('All done\n')
+    fullPathDir = get_full_dirname(outputDir, doOverwrite)
 
-    except Exception as e:
-      #remove previously created directory
-      if (args.cleanup or
-          (os.listdir(fullPathDir) and
-           yes_or_no('Error encountered. Remove Audiobook directory?')
-          )
-         ):
-          print("Deleting directory <{}>\n".format(fullPathDir))
-          shutil.rmtree(fullPathDir)
+    click.echo("\nDownloading audiobook\n"
+               "from {}\n"
+               "to <{}>\n".format(audio_book_url,
+                                  fullPathDir))
 
-      #raise the same exception to print the error
-      raise e
+    with open_browser(audio_book_url) as browser:
+        book_id = get_book_id(browser.page_source)
+        playlist = get_playist(browser, book_id)
+
+    for url, fname in playlist:
+        click.echo('Downloading chapter "{}"'.format(fname))
+        with open('{}.mp3'.format(os.path.join(fullPathDir,fname)), 'wb') as outfile:
+            outfile.write(download_chapter(url))
+
+
+    click.echo('All done\n')
+
+# start the app
+if __name__ == '__main__':
+
+    downloader_main()
