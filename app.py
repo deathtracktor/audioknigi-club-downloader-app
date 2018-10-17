@@ -94,7 +94,7 @@ def get_full_dirname(dirname, doOverwrite):
                 click.echo("overwriting files in <{}>\n".format(fullPathDir))
     else:
       #outputDir does not exist - create directory
-      click.echo("Creating directory <{}>".format(fullPathDir))
+      click.echo("\nCreating directory <{}>".format(fullPathDir))
       os.makedirs(fullPathDir)
 
     return fullPathDir
