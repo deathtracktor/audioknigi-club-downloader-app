@@ -7,7 +7,7 @@ import sys
 geckodriver = 'geckodriver.exe' if sys.platform.startswith('win') else 'geckodriver'
 
 a = Analysis(['app.py'],
-             pathex=['.'],
+             pathex=['.', '..\\Lib\\site-packages'],
              binaries=[(geckodriver, '.')],
              datas=[],
              hiddenimports=['selenium'],
