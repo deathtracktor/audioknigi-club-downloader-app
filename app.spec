@@ -4,11 +4,13 @@ block_cipher = None
 
 import sys
 
+geckodriver = 'geckodriver.exe' if sys.platform.startswith('win') else 'geckodriver'
+
 a = Analysis(['app.py'],
              pathex=['.'],
-             binaries=[('geckodriver'+('.exe' if sys.platform == "windows" else ''), '.')],
+             binaries=[(geckodriver, '.')],
              datas=[],
-             hiddenimports=[],
+             hiddenimports=['selenium'],
              hookspath=[],
              runtime_hooks=[],
              excludes=[],
