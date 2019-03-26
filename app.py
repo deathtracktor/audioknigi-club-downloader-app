@@ -41,7 +41,7 @@ def open_browser(url):
 
 def get_book_id(html):
     """Get the internal book ID."""
-    player = re.compile(r'audioPlayer\((.*)\,')
+    player = re.compile(r'data-global-id="(\d+)\"')
     return player.search(html).group(1)
 
 def get_playist(browser, book_id):
