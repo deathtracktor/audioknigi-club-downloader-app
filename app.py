@@ -3,7 +3,6 @@
 """
 import contextlib
 import json
-import re
 import os
 import sys
 
@@ -13,20 +12,6 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-
-
-AJAX_ON_SUCCESS = '''
-    $(document).ajaxSuccess(function(event, xhr, opt) {
-        if (opt.url.indexOf('ajax/bid') !== -1) {
-            $('body').html($('<div />', {
-                id: 'playlist',
-                text: JSON.parse(xhr.responseText).aItems
-            }))
-        }
-    });
-'''
-
-INIT_PLAYER = '$(document).audioPlayer({}, 0)'
 
 @contextlib.contextmanager
 def open_browser(url):
@@ -39,18 +24,13 @@ def open_browser(url):
     yield browser
     browser.close()
 
-def get_book_id(html):
-    """Get the internal book ID."""
-    player = re.compile(r'data-global-id="(\d+)\"')
-    return player.search(html).group(1)
-
-def get_playist(browser, book_id):
+def get_playist(browser):
     """Extract the playlist."""
-    browser.execute_script(AJAX_ON_SUCCESS)
-    browser.execute_script(INIT_PLAYER.format(book_id))
-    playlist_loaded = EC.presence_of_element_located((By.ID, 'playlist'))
+    script = open(os.path.realpath(__file__) + '.js').read()
+    browser.execute_script(script)
+    playlist_loaded = EC.presence_of_element_located((By.ID, 'book_data'))
     element = WebDriverWait(browser, 60).until(playlist_loaded)
-    return tuple((track['mp3'], track['title']) for track in json.loads(element.text))
+    return json.loads(element.text)
 
 def download_chapter(url):
     """Download a chapter."""
@@ -85,6 +65,9 @@ def get_full_dirname(dirname, do_overwrite):
         os.makedirs(full_path_dir)
     return full_path_dir
 
+def save_byte_data_to_file(full_path_dir, file_name, data):
+    open(os.path.join(full_path_dir, file_name), 'wb').write(data)
+
 @click.command(context_settings=dict(help_option_names=['-h', '--help']))
 @click.argument('audio_book_url')
 @click.option(
@@ -106,13 +89,16 @@ def downloader_main(output_dir, do_overwrite, audio_book_url):
     click.echo(msg.format(audio_book_url, full_path_dir))
 
     with open_browser(audio_book_url) as browser:
-        book_id = get_book_id(browser.page_source)
-        playlist = get_playist(browser, book_id)
+        book_data = get_playist(browser)
+        playlist = tuple((track['mp3'], track['title']) for track in book_data['playlist'])
+
+    save_byte_data_to_file(full_path_dir, '00 - cover.jpg', download_chapter(book_data['cover']))
+    save_byte_data_to_file(full_path_dir, '00 - description.txt', str.encode(book_data['description']))
 
     for url, fname in playlist:
         click.echo('Downloading chapter "{}"'.format(fname))
-        with open('{}.mp3'.format(os.path.join(full_path_dir, fname)), 'wb') as outfile:
-            outfile.write(download_chapter(url))
+        save_byte_data_to_file(full_path_dir, fname + '.mp3', download_chapter(url))
+
 
     click.echo('All done!\n')
 
