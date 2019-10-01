@@ -28,6 +28,7 @@ AJAX_ON_SUCCESS = '''
 
 INIT_PLAYER = '$(document).audioPlayer({}, 0)'
 
+
 @contextlib.contextmanager
 def open_browser(url):
     """Open a web page with Selenium."""
@@ -39,10 +40,12 @@ def open_browser(url):
     yield browser
     browser.close()
 
+
 def get_book_id(html):
     """Get the internal book ID."""
     player = re.compile(r'data-global-id="(\d+)\"')
     return player.search(html).group(1)
+
 
 def get_playist(browser, book_id):
     """Extract the playlist."""
@@ -50,16 +53,21 @@ def get_playist(browser, book_id):
     browser.execute_script(INIT_PLAYER.format(book_id))
     playlist_loaded = EC.presence_of_element_located((By.ID, 'playlist'))
     element = WebDriverWait(browser, 60).until(playlist_loaded)
-    return tuple((track['mp3'], track['title']) for track in json.loads(element.text))
+    return tuple(
+        (track['mp3'], track['title']) for track in json.loads(element.text)
+    )
+
 
 def download_chapter(url):
     """Download a chapter."""
     return requests.get(url).content
 
+
 def get_audiobook_name(url):
     """Extract the audiobook name from its URL."""
     # TODO: sanitize the path
     return url.split('/')[-1]
+
 
 def get_full_dirname(dirname, do_overwrite):
     """
@@ -72,10 +80,14 @@ def get_full_dirname(dirname, do_overwrite):
 
     if os.path.exists(full_path_dir):
         if not os.path.isdir(full_path_dir):
-            click.echo('\n{} exists, and is not a directory!\n'.format(full_path_dir))
+            click.echo('\n{} exists, and is not a directory!\n'.format(
+                full_path_dir)
+            )
             exit(1)
         if os.listdir(full_path_dir) and not do_overwrite:
-            if not click.confirm('\nDirectory "{}" exists. Overwrite?'.format(full_path_dir)):
+            if not click.confirm('\nDirectory "{}" exists. Overwrite?'.format(
+                    full_path_dir)
+            ):
                 sys.exit(1)
             else:
                 click.echo('Overwriting files in "{}"\n'.format(full_path_dir))
@@ -85,17 +97,23 @@ def get_full_dirname(dirname, do_overwrite):
         os.makedirs(full_path_dir)
     return full_path_dir
 
+
 @click.command(context_settings=dict(help_option_names=['-h', '--help']))
 @click.argument('audio_book_url')
 @click.option(
     '-o', '--output_dir', 'output_dir', default=None,
-    help='Directory the audio book will be dowloaded to. Default: <Audio Book Name>'
+    help='Directory the audio book will be dowloaded to. '
+         'Default: <Audio Book Name>'
 )
 @click.option(
     '-w', '--overwrite', 'do_overwrite', is_flag=True,
     help='Overwrite existing audiobook directory without asking'
 )
-def downloader_main(output_dir, do_overwrite, audio_book_url):
+@click.option(
+    '-1', '--onefile', 'one_file', is_flag=True,
+    help='Write whole book in one file'
+)
+def downloader_main(output_dir, do_overwrite, one_file, audio_book_url):
     """Download the book."""
     if output_dir is None:
         output_dir = get_audiobook_name(audio_book_url)
@@ -111,10 +129,19 @@ def downloader_main(output_dir, do_overwrite, audio_book_url):
 
     for url, fname in playlist:
         click.echo('Downloading chapter "{}"'.format(fname))
-        with open('{}.mp3'.format(os.path.join(full_path_dir, fname)), 'wb') as outfile:
-            outfile.write(download_chapter(url))
+        if one_file:
+            with open(
+                    '{}.mp3'.format(get_audiobook_name(audio_book_url)), 'ab'
+            ) as outfile:
+                outfile.write(download_chapter(url))
+        else:
+            with open(
+                    '{}.mp3'.format(os.path.join(full_path_dir, fname)), 'wb'
+            ) as outfile:
+                outfile.write(download_chapter(url))
 
     click.echo('All done!\n')
+
 
 # start the app
 if __name__ == '__main__':
