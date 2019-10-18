@@ -1,4 +1,5 @@
 *.exe
 *.log
 *.pyc
+*.mp3
 build

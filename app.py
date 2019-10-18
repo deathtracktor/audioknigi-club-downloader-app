@@ -129,7 +129,7 @@ def downloader_main(output_dir, do_overwrite, one_file, audio_book_url):
         click.echo('Downloading chapter "{}"'.format(fname))
         if one_file:
             file_name_and_path = '{}.mp3'.format(
-                get_audiobook_name(os.path.join(full_path_dir, audio_book_url))
+                os.path.join(full_path_dir, get_audiobook_name(audio_book_url))
             )
             file_mode = 'ab'
         else:
