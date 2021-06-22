@@ -34,6 +34,6 @@ scripts\python app.py
 cd src
 pyinstaller app.spec --onefile
 ```
-NB: A precompiled Windows 64-bit executable can be found [here](/deathtracktor/audioknigi-club-downloader-app/releases/latest).
+NB: A precompiled Windows 64-bit executable can be found [here](https://github.com/deathtracktor/audioknigi-club-downloader-app/releases/latest).
 
 ## Enjoy!
