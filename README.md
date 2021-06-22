@@ -34,6 +34,6 @@ scripts\python app.py
 cd src
 pyinstaller app.spec --onefile
 ```
-NB: A precompiled Windows 64-bit executable can be found [here](dist/app.exe).
+NB: A precompiled Windows 64-bit executable can be found [here](releases/download/0.0.2/app.exe).
 
 ## Enjoy!
