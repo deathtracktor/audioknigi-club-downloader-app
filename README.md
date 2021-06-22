@@ -1,3 +1,9 @@
+ATTENTION!
+==========
+The current `master` code is no longer working due to massive changes at the web site, which has also moved to a new location.
+In the mean time, have a look at the `refactoring` branch.
+
+
 Download multi-part audio books from Audioknigi.club
 ----------------------------------------------------
 
