@@ -37,6 +37,9 @@ def get_current_chapter_url(browser):
 @contextmanager
 def open_browser(url):
     """Open a web page with Selenium."""
+    if getattr(sys, 'frozen', False):
+        tmp_path = getattr(sys, '_MEIPASS')
+        os.environ['PATH'] += os.pathsep + tmp_path
     fp = webdriver.FirefoxProfile()
     fp.accept_untrusted_certs = True
     fp.set_preference('permissions.default.image', 2)  # disable images
