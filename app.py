@@ -155,5 +155,5 @@ def cli(audio_book_url, output_dir, force_overwrite, one_file):
 
 if __name__ == '__main__':
     # NB: PyInstaller likes this
-    multiprocessing.freeze_support()
+    freeze_support()
     cli()
