@@ -1,6 +1,7 @@
 click==8.0.1
-pyinstaller==4.3
+pyinstaller==5.9.0
 pathvalidate==0.29.0
 requests==2.25.1
-selenium==3.141.0
-selenium-wire==4.3.1
+selenium==4.8.2
+selenium-wire==5.1.0
+tenacity==8.2.2

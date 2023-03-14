@@ -7,11 +7,14 @@ import os
 import sys
 from time import sleep
 from multiprocessing import freeze_support, Process, Queue
+from urllib.parse import urlparse
 
 import click
 import requests
 from pathvalidate import sanitize_filename
+from selenium.webdriver.common.by import By
 from seleniumwire import webdriver
+from tenacity import retry, stop_after_attempt, wait_fixed 
 
 
 def get_book_title(url):
@@ -22,14 +25,15 @@ def get_book_title(url):
 def get_chapter_elements(browser):
     """Get player UI element representing a chapter."""
     selector = '//div[boolean(@data-pos) and boolean(@data-id)]'
-    for el in browser.find_elements_by_xpath(selector):
+    for el in browser.find_elements(By.XPATH, selector):
         yield el
 
 
+@retry(stop=stop_after_attempt(20), wait=wait_fixed(5))
 def get_current_chapter_url(browser):
     """Get the most recent media request."""
     urls = (r.url for r in reversed(browser.requests))
-    mp3_urls = filter(lambda url: url.endswith('.mp3'), urls)
+    mp3_urls = filter(lambda url: urlparse(url).path.endswith('.mp3'), urls)
     url = next(mp3_urls)
     return url
 
