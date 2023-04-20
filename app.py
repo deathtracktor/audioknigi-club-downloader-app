@@ -32,8 +32,14 @@ def get_chapter_elements(browser):
 @retry(stop=stop_after_attempt(20), wait=wait_fixed(5))
 def get_current_chapter_url(browser):
     """Get the most recent media request."""
+    def is_mp3(url):
+        path = urlparse(url).path
+        return any((
+            path.endswith('.mp3'),
+            path.endswith('.m3u8'),
+        ))
     urls = (r.url for r in reversed(browser.requests))
-    mp3_urls = filter(lambda url: urlparse(url).path.endswith('.mp3'), urls)
+    mp3_urls = filter(is_mp3, urls)
     url = next(mp3_urls)
     return url
 
