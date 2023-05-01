@@ -2,19 +2,17 @@
     Download complete audio books from audioknigi.ru
 """
 from contextlib import contextmanager
-from itertools import count
 import os
 import sys
-from time import sleep
-from multiprocessing import freeze_support, Process, Queue
 from urllib.parse import urlparse
 
+from Crypto.Cipher import AES
 import click
+import m3u8
 import requests
 from pathvalidate import sanitize_filename
-from selenium.webdriver.common.by import By
 from seleniumwire import webdriver
-from tenacity import retry, stop_after_attempt, wait_fixed 
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 
 def get_book_title(url):
@@ -22,26 +20,15 @@ def get_book_title(url):
     return sanitize_filename(url.split('/')[-1])
 
 
-def get_chapter_elements(browser):
-    """Get player UI element representing a chapter."""
-    selector = '//div[boolean(@data-pos) and boolean(@data-id)]'
-    for el in browser.find_elements(By.XPATH, selector):
-        yield el
-
-
-@retry(stop=stop_after_attempt(20), wait=wait_fixed(5))
-def get_current_chapter_url(browser):
-    """Get the most recent media request."""
-    def is_mp3(url):
-        path = urlparse(url).path
-        return any((
-            path.endswith('.mp3'),
-            path.endswith('.m3u8'),
-        ))
+@retry(stop=stop_after_attempt(20), wait=wait_fixed(5),
+       retry=retry_if_exception_type(FileNotFoundError))
+def get_playlist_url(browser):
+    """Get the URL of the M3U8 playlist."""
     urls = (r.url for r in reversed(browser.requests))
-    mp3_urls = filter(is_mp3, urls)
-    url = next(mp3_urls)
-    return url
+    for url in urls:
+        if urlparse(url).path.endswith('.m3u8'):
+            return url
+    raise FileNotFoundError('No m3u8 playlist.')
 
 
 @contextmanager
@@ -61,36 +48,11 @@ def open_browser(url):
         browser.close()
 
 
-def scrape_chapter_metadata(audio_book_url, queue):
-    """Scrape chapter URLs and titles."""
-    cached = []
-    with open_browser(audio_book_url) as browser:
-        for el in get_chapter_elements(browser):
-            el.click()
-            sleep(1)
-            url = get_current_chapter_url(browser)
-            if url not in cached:
-                cached.append(url)
-                queue.put(url)
-    queue.put(None)
-
-
-@contextmanager
-def get_playlist(audio_book_url):
-    """Fetch the complete playlist in background."""
-    queue = Queue()
-    p = Process(target=scrape_chapter_metadata, args=(audio_book_url, queue,))
-    p.start()
-    try:
-        yield queue
-    finally:
-        p.join()
-
-
-def download_chapter(url):
-    """Download a chapter."""
-    with requests.get(url) as r:
-        return r.content
+def get_key(url):
+    """Download decryption key."""
+    resp = requests.get(url)
+    assert resp.status_code == 200, 'Could not fetch decryption key.'
+    return resp.content
 
 
 def get_non_blank_path(*dirs):
@@ -105,7 +67,7 @@ def get_or_create_output_dir(dirname, book_title):
         os.makedirs(path, exist_ok=True)
         return path
     except FileExistsError:
-        raise TypeError('"{}" is not a directory.'.format(path))
+        raise TypeError(f'"{ path }" is not a directory.')
 
 
 def contains_files(path):
@@ -137,33 +99,35 @@ def cli(audio_book_url, output_dir, force_overwrite, one_file):
         sys.exit(1)
 
     if contains_files(path) and not force_overwrite:
-        msg = 'The directory "{}" is not empty. Overwite?'.format(path)
+        msg = f'The directory "{ path }" is not empty. Overwite?'
         if not click.confirm(msg):
             click.echo('Terminated.')
             sys.exit(0)
 
-    click.echo('Downloading "{}" to "{}"...'.format(audio_book_url, path))
+    click.echo(f'Downloading "{ audio_book_url }" to "{ path }"...')
 
     if one_file:
         output_file = lambda _: open(os.path.join(path, book_title), 'ab')
     else:
         output_file = lambda fname: open(os.path.join(path, fname), 'wb')
 
-    counter = count(1)
-    with get_playlist(audio_book_url) as queue:
-        while True:
-            url = queue.get()
-            if url is None:
-                break
-            chapter = next(counter)
-            click.echo('Downloading chapter {}...'.format(chapter))
-            with output_file('chapter-{:03d}.mp3'.format(chapter)) as outfile:
-                outfile.write(download_chapter(url))
+    # FIXME: HERE ARE DRAGONS
+    # TODO: download segments concurrently
+    with open_browser(audio_book_url) as browser:
+        playlist_url = get_playlist_url(browser)
+
+    playlist = m3u8.load(playlist_url)
+    for n, segment in enumerate(playlist.segments, start=1):
+        key = get_key(segment.key.absolute_uri)
+        iv = bytes.fromhex(segment.key.iv.lstrip('0x'))
+        cipher = AES.new(key, AES.MODE_CBC, IV=iv)
+        with output_file(f'chapter-{n:03d}.mp3') as outfile:
+            click.echo(f'Downloading chapter { n }/{ len(playlist.segments) }...')
+            for chunk in requests.get(segment.absolute_uri, stream=True):
+                outfile.write(cipher.decrypt(chunk))
 
     click.echo('All done!\n')
 
 
 if __name__ == '__main__':
-    # NB: PyInstaller likes this
-    freeze_support()
     cli()
