@@ -2,28 +2,38 @@
     Download complete audio books from audioknigi.ru
 """
 from contextlib import contextmanager
+from functools import partial
+from itertools import count
+from pathlib import Path
 import os
 import sys
 from urllib.parse import urlparse
 
+from typing import Callable, Iterable
+
 from Crypto.Cipher import AES
 import click
-import m3u8
+import m3u8  # type:ignore
 import requests
-from pathvalidate import sanitize_filename
-from seleniumwire import webdriver
+from pathvalidate import sanitize_filename  # type:ignore
+from selenium.webdriver.firefox.options import Options
+from seleniumwire import webdriver  # type:ignore
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 
-def get_book_title(url):
-    """Extract the audiobook name from its URL."""
+def get_book_title(url: str) -> str:
+    """
+    Extract the audiobook name from its URL.
+    """
     return sanitize_filename(url.split('/')[-1])
 
 
 @retry(stop=stop_after_attempt(20), wait=wait_fixed(5),
        retry=retry_if_exception_type(FileNotFoundError))
-def get_playlist_url(browser):
-    """Get the URL of the M3U8 playlist."""
+def get_m3u8_url(browser) -> str:
+    """
+    Return the first URL containing the `.m3u8` path suffix.
+    """
     urls = (r.url for r in reversed(browser.requests))
     for url in urls:
         if urlparse(url).path.endswith('.m3u8'):
@@ -31,16 +41,26 @@ def get_playlist_url(browser):
     raise FileNotFoundError('No m3u8 playlist.')
 
 
+def get_signed_playlist_url(url: str) -> str:
+    """
+    Open book page in the browser, get the signed playlist URL.
+    """
+    with open_browser(url) as browser:
+        return get_m3u8_url(browser)
+
+
 @contextmanager
 def open_browser(url):
-    """Open a web page with Selenium."""
+    """
+    Open a web page with Selenium.
+    """
     if getattr(sys, 'frozen', False):
         tmp_path = getattr(sys, '_MEIPASS')
         os.environ['PATH'] += os.pathsep + tmp_path
-    fp = webdriver.FirefoxProfile()
-    fp.accept_untrusted_certs = True
-    fp.set_preference('permissions.default.image', 2)  # disable images
-    browser = webdriver.Firefox(firefox_profile=fp)
+    opt = Options()
+    opt.add_argument('-headless')  # run in a headless mode
+    opt.set_preference('permissions.default.image', 2)  # disable images
+    browser = webdriver.Firefox(options=opt)
     browser.get(url)
     try:
         yield browser
@@ -48,31 +68,54 @@ def open_browser(url):
         browser.close()
 
 
-def get_key(url):
+def get_or_create_output_dir(dirname: str, book_title: str) -> Path:
+    """
+    Create or reuse output directory in a fail-safe manner.
+    """
+    dirs = (dirname, book_title, str(Path.cwd()))
+    path = Path(next(filter(bool, dirs))).resolve()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        raise TypeError(f'"{ path }" is not a directory.')
+    return path
+
+
+def contains_files(path: Path) -> bool:
+    """
+    Return True if the directory is not empty.
+    """
+    for _ in path.iterdir():
+        return True
+    return False
+
+
+def file_factory(prefix: Path, title: str, merge: bool) -> Iterable[Callable]:
+    """
+    A factory producing file openers for the audio segments.
+    Always append to one single file if segment merging is requested.
+    """
+    mode = 'ab' if merge else 'wb'
+    for index in count(start=1):
+        stem = f'{title}' if merge else f'{title}-{index:03}'
+        path = (prefix / stem).with_suffix('.mp3')
+        yield partial(open, path, mode)
+
+
+def get_key(url: str) -> bytes:
     """Download decryption key."""
     resp = requests.get(url)
     assert resp.status_code == 200, 'Could not fetch decryption key.'
     return resp.content
 
 
-def get_non_blank_path(*dirs):
-    """Return the first non-blank directory path."""
-    return os.path.abspath(next(filter(bool, dirs)))
-
-
-def get_or_create_output_dir(dirname, book_title):
-    """Create or reuse output directory in a fail-safe manner."""
-    path = get_non_blank_path(dirname, book_title, os.getcwd())
-    try:
-        os.makedirs(path, exist_ok=True)
-        return path
-    except FileExistsError:
-        raise TypeError(f'"{ path }" is not a directory.')
-
-
-def contains_files(path):
-    """Return True if the directory is not empty."""
-    return bool(os.listdir(path))
+def make_cipher_for_segment(segment):
+    """
+    Initialize an AES decryptor.
+    """
+    key = get_key(segment.key.absolute_uri)
+    iv = bytes.fromhex(segment.key.iv.lstrip('0x'))
+    return AES.new(key, AES.MODE_CBC, IV=iv)
 
 
 @click.command()
@@ -92,40 +135,22 @@ def contains_files(path):
 def cli(audio_book_url, output_dir, force_overwrite, one_file):
     """Download the complete book."""
     book_title = get_book_title(audio_book_url)
-    try:
-        path = get_or_create_output_dir(output_dir, book_title)
-    except TypeError as exc:
-        click.echo(str(exc))
-        sys.exit(1)
-
+    path = get_or_create_output_dir(output_dir, book_title)
     if contains_files(path) and not force_overwrite:
         msg = f'The directory "{ path }" is not empty. Overwite?'
         if not click.confirm(msg):
             click.echo('Terminated.')
             sys.exit(0)
-
     click.echo(f'Downloading "{ audio_book_url }" to "{ path }"...')
-
-    if one_file:
-        output_file = lambda _: open(os.path.join(path, book_title), 'ab')
-    else:
-        output_file = lambda fname: open(os.path.join(path, fname), 'wb')
-
-    # FIXME: HERE ARE DRAGONS
-    # TODO: download segments concurrently
-    with open_browser(audio_book_url) as browser:
-        playlist_url = get_playlist_url(browser)
-
-    playlist = m3u8.load(playlist_url)
-    for n, segment in enumerate(playlist.segments, start=1):
-        key = get_key(segment.key.absolute_uri)
-        iv = bytes.fromhex(segment.key.iv.lstrip('0x'))
-        cipher = AES.new(key, AES.MODE_CBC, IV=iv)
-        with output_file(f'chapter-{n:03d}.mp3') as outfile:
-            click.echo(f'Downloading chapter { n }/{ len(playlist.segments) }...')
+    playlist_url = get_signed_playlist_url(audio_book_url)
+    segments = m3u8.load(playlist_url).segments
+    openers = file_factory(path, book_title, merge=one_file)
+    for n, [segment, opener] in enumerate(zip(segments, openers), start=1):
+        cipher = make_cipher_for_segment(segment)
+        with opener() as file:
+            click.echo(f'Downloading segment { n }/{ len(segments) }...')
             for chunk in requests.get(segment.absolute_uri, stream=True):
-                outfile.write(cipher.decrypt(chunk))
-
+                file.write(cipher.decrypt(chunk))
     click.echo('All done!\n')
 
 
