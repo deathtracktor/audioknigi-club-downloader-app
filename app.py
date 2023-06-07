@@ -13,12 +13,14 @@ from typing import Callable, Iterable
 
 from Crypto.Cipher import AES
 import click
+import ffmpeg
 import m3u8  # type:ignore
 import requests
 from pathvalidate import sanitize_filename  # type:ignore
 from selenium.webdriver.firefox.options import Options
 from seleniumwire import webdriver  # type:ignore
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
+import tqdm
 
 
 def get_book_title(url: str) -> str:
@@ -81,15 +83,6 @@ def get_or_create_output_dir(dirname: str, book_title: str) -> Path:
     return path
 
 
-def contains_files(path: Path) -> bool:
-    """
-    Return True if the directory is not empty.
-    """
-    for _ in path.iterdir():
-        return True
-    return False
-
-
 def file_factory(prefix: Path, title: str, merge: bool) -> Iterable[Callable]:
     """
     A factory producing file openers for the audio segments.
@@ -98,12 +91,14 @@ def file_factory(prefix: Path, title: str, merge: bool) -> Iterable[Callable]:
     mode = 'ab' if merge else 'wb'
     for index in count(start=1):
         stem = f'{title}' if merge else f'{title}-{index:03}'
-        path = (prefix / stem).with_suffix('.mp3')
+        path = (prefix / stem).with_suffix('.ts')
         yield partial(open, path, mode)
 
 
 def get_key(url: str) -> bytes:
-    """Download decryption key."""
+    """
+    Download decryption key.
+    """
     resp = requests.get(url)
     assert resp.status_code == 200, 'Could not fetch decryption key.'
     return resp.content
@@ -118,6 +113,32 @@ def make_cipher_for_segment(segment):
     return AES.new(key, AES.MODE_CBC, IV=iv)
 
 
+def convert_to_mp3(stream_path: Path) -> None:
+    """
+    Attempt to convert .ts file to .mp3 with `ffmpeg`.
+    """
+    mp3_path = str(stream_path.with_suffix('.mp3'))
+    try:
+        ffmpeg.input(stream_path).output(mp3_path).run()
+    except FileNotFoundError:
+        click.echo("Warning: `ffmpeg` is not installed, won't convert to MP3.")
+    else:
+        stream_path.unlink()
+
+
+def confirm_overwrite(overwrite: bool, path: Path) -> None:
+    """
+    Confirm overwriting of non-empty target directories.
+    """
+    if overwrite:
+        return
+    for _ in path.iterdir():
+        if click.confirm(f'The directory "{ path }" is not empty. Overwrite?'):
+            return
+        click.echo('Terminated.')
+        sys.exit(0)
+
+
 @click.command()
 @click.argument('audio_book_url')
 @click.option(
@@ -128,31 +149,25 @@ def make_cipher_for_segment(segment):
     '-y', '--yes', 'force_overwrite', is_flag=True,
     help='Overwrite existing files without a prompt.'
 )
-@click.option(
-    '-1', '--one-file', 'one_file', is_flag=True,
-    help='Merge all book chapters into one file.'
-)
-def cli(audio_book_url, output_dir, force_overwrite, one_file):
-    """Download the complete book."""
+def cli(audio_book_url, output_dir, force_overwrite):
+    """
+    Download the complete book.
+    """
     book_title = get_book_title(audio_book_url)
     path = get_or_create_output_dir(output_dir, book_title)
-    if contains_files(path) and not force_overwrite:
-        msg = f'The directory "{ path }" is not empty. Overwite?'
-        if not click.confirm(msg):
-            click.echo('Terminated.')
-            sys.exit(0)
-    click.echo(f'Downloading "{ audio_book_url }" to "{ path }"...')
+    confirm_overwrite(force_overwrite, path)
+    click.echo('Fetching book metadata, please stand by...')
     playlist_url = get_signed_playlist_url(audio_book_url)
     segments = m3u8.load(playlist_url).segments
-    openers = file_factory(path, book_title, merge=one_file)
-    for n, [segment, opener] in enumerate(zip(segments, openers), start=1):
-        cipher = make_cipher_for_segment(segment)
-        with opener() as file:
-            click.echo(f'Downloading segment { n }/{ len(segments) }...')
+    stream_path = (path / book_title).with_suffix('.ts')
+    with open(stream_path, mode='wb') as file:
+        bar_format = 'Downloading segment {n}/{total} [{elapsed}]'
+        for segment in tqdm.tqdm(segments, bar_format=bar_format):
+            cipher = make_cipher_for_segment(segment)
             for chunk in requests.get(segment.absolute_uri, stream=True):
                 file.write(cipher.decrypt(chunk))
-    click.echo('All done!\n')
-
+    convert_to_mp3(stream_path)
+    click.echo(f'Finished, check the { path } directory.\n')
 
 if __name__ == '__main__':
     cli()

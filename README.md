@@ -13,17 +13,20 @@ Download multi-part audio books from Audioknigi.club
 
 * Create a virtual environment, clone the code:
 ```
-virtualenv downloader
-cd downloader
-git clone https://github.com/deathtracktor/audioknigi-club-downloader-app.git src
+$ git clone https://github.com/deathtracktor/audioknigi-club-downloader-app.git src
+$ cd audioknigi-club-downloader-app
+$ python -m venv .venv
 ```
 
-* Install dependencies:
+* Activate virtual environment, install dependencies:
 ```
-scripts\pip install -r src\requirements.txt
+$ source .venv/bin/activate
+# Windows
+> .venv\Scripts\activate
 ```
-* Download [Geckodriver](https://github.com/mozilla/geckodriver/releases), extract to your current working directory.
-* Make sure you have the recent version of Firefox installed.
+* Make sure you have the recent version of Firefox installed;
+* Download [Geckodriver](https://github.com/mozilla/geckodriver/releases), extract to your current working directory;
+* Download and install [ffmpeg](https://ffmpeg.org/) (optional);
 * Run the app:
 ```
 cd src
@@ -32,7 +35,7 @@ scripts\python app.py
 * Or build a single-file executable:
 ```
 cd src
-pyinstaller app.spec --onefile
+pyinstaller app.spec
 ```
 
 ## Enjoy!

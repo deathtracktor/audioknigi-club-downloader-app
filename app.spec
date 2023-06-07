@@ -4,7 +4,7 @@ block_cipher = None
 
 import sys
 
-geckodriver = 'geckodriver.exe' if sys.platform.startswith('win') else 'geckodriver'
+exe_suffix = '.exe' if sys.platform.startswith('win') else ''
 
 a = Analysis(
     ['app.py'],
@@ -13,7 +13,10 @@ a = Analysis(
         os.path.join(os.pardir, 'Lib', 'site-packages'),
         os.path.join('.venv', 'Lib', 'site-packages'),
     ],
-    binaries=[(geckodriver, '.')],
+    binaries=[
+        (f'geckodriver{ exe_suffix }', '.'),
+        (f'ffmpeg{ exe_suffix }', '.'),
+    ],
     datas=[],
     hiddenimports=['selenium'],
     hookspath=[],
