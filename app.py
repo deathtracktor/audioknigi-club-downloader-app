@@ -21,6 +21,7 @@ from selenium.webdriver.firefox.options import Options
 from seleniumwire import webdriver  # type:ignore
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 import tqdm
+import time
 
 
 def get_book_title(url: str) -> str:
@@ -163,9 +164,32 @@ def cli(audio_book_url, output_dir, force_overwrite):
     with open(stream_path, mode='wb') as file:
         bar_format = 'Downloading segment {n}/{total} [{elapsed}]'
         for segment in tqdm.tqdm(segments, bar_format=bar_format):
-            cipher = make_cipher_for_segment(segment)
-            for chunk in requests.get(segment.absolute_uri, stream=True):
-                file.write(cipher.decrypt(chunk))
+            attempts = 3
+            for attempt in range(attempts):
+                try:
+                    cipher = make_cipher_for_segment(segment)
+                    break
+                except Exception as e:
+                    if attempt < attempts - 1:  
+                        click.echo(f'\ncipher failed, retrying...')
+                        time.sleep(3)  
+                        continue
+                    else:
+                        raise e
+            
+            attempts = 10
+            for attempt in range(attempts):
+                try:
+                    for chunk in requests.get(segment.absolute_uri, stream=True):
+                        file.write(cipher.decrypt(chunk))
+                    break  
+                except Exception as e:
+                    if attempt < attempts - 1:  
+                        click.echo(f'\nconnection failed, retrying...')
+                        time.sleep(3)  
+                        continue
+                    else:
+                        raise e      
     convert_to_mp3(stream_path)
     click.echo(f'Finished, check the { path } directory.\n')
 
