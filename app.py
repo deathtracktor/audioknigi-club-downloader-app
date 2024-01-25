@@ -21,7 +21,6 @@ from selenium.webdriver.firefox.options import Options
 from seleniumwire import webdriver  # type:ignore
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 import tqdm
-import time
 
 
 def get_book_title(url: str) -> str:
@@ -104,14 +103,19 @@ def get_key(url: str) -> bytes:
     assert resp.status_code == 200, 'Could not fetch decryption key.'
     return resp.content
 
-
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(3),
+         retry=retry_if_exception_type(requests.exceptions.ConnectionError))
 def make_cipher_for_segment(segment):
     """
     Initialize an AES decryptor.
     """
-    key = get_key(segment.key.absolute_uri)
-    iv = bytes.fromhex(segment.key.iv.lstrip('0x'))
-    return AES.new(key, AES.MODE_CBC, IV=iv)
+    try:
+        key = get_key(segment.key.absolute_uri)
+        iv = bytes.fromhex(segment.key.iv.lstrip('0x'))
+        return AES.new(key, AES.MODE_CBC, IV=iv)
+    except requests.exceptions.ConnectionError:
+        # click.echo(' - Connection error in make_cipher, retrying...')
+        raise 
 
 
 def convert_to_mp3(stream_path: Path) -> None:
@@ -139,6 +143,15 @@ def confirm_overwrite(overwrite: bool, path: Path) -> None:
         click.echo('Terminated.')
         sys.exit(0)
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(3),
+            retry=retry_if_exception_type(requests.exceptions.ConnectionError))
+def write_chunks(file, cipher, segment) -> None:
+    try:
+        for chunk in requests.get(segment.absolute_uri, stream=True):
+            file.write(cipher.decrypt(chunk)) 
+    except requests.exceptions.ConnectionError:
+        # click.echo(' - Connection error in write_chunks, retrying...')
+        raise
 
 @click.command()
 @click.argument('audio_book_url')
@@ -164,32 +177,8 @@ def cli(audio_book_url, output_dir, force_overwrite):
     with open(stream_path, mode='wb') as file:
         bar_format = 'Downloading segment {n}/{total} [{elapsed}]'
         for segment in tqdm.tqdm(segments, bar_format=bar_format):
-            attempts = 3
-            for attempt in range(attempts):
-                try:
-                    cipher = make_cipher_for_segment(segment)
-                    break
-                except Exception as e:
-                    if attempt < attempts - 1:  
-                        click.echo(f'\ncipher failed, retrying...')
-                        time.sleep(3)  
-                        continue
-                    else:
-                        raise e
-            
-            attempts = 10
-            for attempt in range(attempts):
-                try:
-                    for chunk in requests.get(segment.absolute_uri, stream=True):
-                        file.write(cipher.decrypt(chunk))
-                    break  
-                except Exception as e:
-                    if attempt < attempts - 1:  
-                        click.echo(f'\nconnection failed, retrying...')
-                        time.sleep(3)  
-                        continue
-                    else:
-                        raise e      
+            cipher = make_cipher_for_segment(segment)
+            write_chunks(file, cipher, segment)
     convert_to_mp3(stream_path)
     click.echo(f'Finished, check the { path } directory.\n')
 
