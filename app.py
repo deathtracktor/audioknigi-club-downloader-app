@@ -104,8 +104,8 @@ def get_key(url: str) -> bytes:
     return resp.content
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(3),
-         retry=retry_if_exception_type(requests.exceptions.ConnectionError),
-         after=lambda s: click.echo(f" Retrying connection, attempt #{s.attempt_number}"))
+       retry=retry_if_exception_type(requests.exceptions.ConnectionError),
+       after=lambda s: click.echo(f'Retrying connection, attempt #{s.attempt_number}'))
 def make_cipher_for_segment(segment):
     """
     Initialize an AES decryptor.
@@ -113,7 +113,6 @@ def make_cipher_for_segment(segment):
     key = get_key(segment.key.absolute_uri)
     iv = bytes.fromhex(segment.key.iv.lstrip('0x'))
     return AES.new(key, AES.MODE_CBC, IV=iv)
-    
 
 
 def convert_to_mp3(stream_path: Path) -> None:
@@ -142,15 +141,15 @@ def confirm_overwrite(overwrite: bool, path: Path) -> None:
         sys.exit(0)
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(3),
-            retry=retry_if_exception_type(requests.exceptions.ConnectionError),
-            after=lambda s: click.echo(f" Retrying connection, attempt #{s.attempt_number}"))
+       retry=retry_if_exception_type(requests.exceptions.ConnectionError),
+       after=lambda s: click.echo(f'Retrying connection, attempt #{s.attempt_number}'))
 def write_chunks(file, cipher, segment) -> None:
     """ 
     Write decrypted chunks to the file.
     """
     for chunk in requests.get(segment.absolute_uri, stream=True):
-        file.write(cipher.decrypt(chunk)) 
-    
+        file.write(cipher.decrypt(chunk))
+
 
 @click.command()
 @click.argument('audio_book_url')
