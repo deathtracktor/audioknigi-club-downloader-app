@@ -13,8 +13,8 @@ from typing import Callable, Iterable, Mapping
 
 from Crypto.Cipher import AES
 import click
-import ffmpeg
-import m3u8  # type:ignore
+import ffmpeg  # type:ignore[import-untyped]
+import m3u8  # type:ignore[import-untyped]
 import requests
 from pathvalidate import sanitize_filename  # type:ignore
 from selenium.webdriver.firefox.options import Options
@@ -52,10 +52,10 @@ def get_signed_playlist_url(url: str) -> str:
         'retry': retry_if_exception_type(FileNotFoundError),
     }
     with open_browser(url) as browser:
-        for attempt in Retrying(**retry_opt):
+        for retry_no, attempt in enumerate(Retrying(**retry_opt), start=1):
             with attempt, suppress(RetryError):
                 return get_m3u8_url(browser)
-            click.echo(f'Waiting for playlist [{ attempt.attempt_number }]')
+            click.echo(f'Waiting for playlist [{ retry_no }]')
     raise click.Abort('Failed to fetch playlist.')
 
 
@@ -155,8 +155,7 @@ def confirm_overwrite(overwrite: bool, path: Path) -> None:
     for _ in path.iterdir():
         if click.confirm(f'The directory "{ path }" is not empty. Overwrite?'):
             return
-        click.echo('Terminated.')
-        raise click.Abort(code=0)
+        raise click.Abort('Terminated.')
 
 
 @click.command()
