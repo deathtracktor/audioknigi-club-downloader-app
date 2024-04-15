@@ -1,7 +1,7 @@
 """
     Download complete audio books from audioknigi.ru
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from functools import partial
 from itertools import count
 from pathlib import Path
@@ -9,7 +9,7 @@ import os
 import sys
 from urllib.parse import urlparse
 
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 from Crypto.Cipher import AES
 import click
@@ -19,7 +19,8 @@ import requests
 from pathvalidate import sanitize_filename  # type:ignore
 from selenium.webdriver.firefox.options import Options
 from seleniumwire import webdriver  # type:ignore
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
+from tenacity import (Retrying, RetryError, retry, retry_if_exception_type,
+                      stop_after_attempt, wait_fixed)
 import tqdm
 
 
@@ -30,8 +31,6 @@ def get_book_title(url: str) -> str:
     return sanitize_filename(url.split('/')[-1])
 
 
-@retry(stop=stop_after_attempt(20), wait=wait_fixed(5),
-       retry=retry_if_exception_type(FileNotFoundError))
 def get_m3u8_url(browser) -> str:
     """
     Return the first URL containing the `.m3u8` path suffix.
@@ -40,15 +39,24 @@ def get_m3u8_url(browser) -> str:
     for url in urls:
         if urlparse(url).path.endswith('.m3u8'):
             return url
-    raise FileNotFoundError('No m3u8 playlist.')
+    raise FileNotFoundError
 
 
 def get_signed_playlist_url(url: str) -> str:
     """
     Open book page in the browser, get the signed playlist URL.
     """
+    retry_opt: Mapping = {
+        'stop': stop_after_attempt(20),
+        'wait': wait_fixed(5),
+        'retry': retry_if_exception_type(FileNotFoundError),
+    }
     with open_browser(url) as browser:
-        return get_m3u8_url(browser)
+        for attempt in Retrying(**retry_opt):
+            with attempt, suppress(RetryError):
+                return get_m3u8_url(browser)
+            click.echo(f'Waiting for playlist [{ attempt.attempt_number }]')
+    raise click.Abort('Failed to fetch playlist.')
 
 
 @contextmanager
@@ -61,7 +69,6 @@ def open_browser(url):
         os.environ['PATH'] += os.pathsep + tmp_path
     opt = Options()
     opt.add_argument('-headless')  # run in a headless mode
-    opt.set_preference('permissions.default.image', 2)  # disable images
     browser = webdriver.Firefox(options=opt)
     browser.get(url)
     try:
@@ -79,7 +86,8 @@ def get_or_create_output_dir(dirname: str, book_title: str) -> Path:
     try:
         path.mkdir(parents=True, exist_ok=True)
     except FileExistsError:
-        raise TypeError(f'"{ path }" is not a directory.')
+        # pylint:disable=raise-missing-from
+        raise click.BadParameter(f'"{ path }" is not a directory.')
     return path
 
 
@@ -95,17 +103,27 @@ def file_factory(prefix: Path, title: str, merge: bool) -> Iterable[Callable]:
         yield partial(open, path, mode)
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(3),
+       retry=retry_if_exception_type(requests.exceptions.ConnectionError),
+       after=lambda s: click.echo(f'Waiting for server response [{ s.attempt_number }]'))
+def http_get(url: str, **kwargs) -> requests.Response:
+    """
+    Make an HTTP get request, return response.
+    Retry on connection failures.
+    """
+    return requests.get(url, timeout=10, **kwargs)
+
+
 def get_key(url: str) -> bytes:
     """
     Download decryption key.
     """
-    resp = requests.get(url)
-    assert resp.status_code == 200, 'Could not fetch decryption key.'
+    resp = requests.get(url, timeout=10)
+    if resp.status_code != 200:
+        raise click.Abort('Could not fetch decryption key.')
     return resp.content
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(3),
-       retry=retry_if_exception_type(requests.exceptions.ConnectionError),
-       after=lambda s: click.echo(f'Retrying connection, attempt #{s.attempt_number}'))
+
 def make_cipher_for_segment(segment):
     """
     Initialize an AES decryptor.
@@ -138,17 +156,7 @@ def confirm_overwrite(overwrite: bool, path: Path) -> None:
         if click.confirm(f'The directory "{ path }" is not empty. Overwrite?'):
             return
         click.echo('Terminated.')
-        sys.exit(0)
-
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(3),
-       retry=retry_if_exception_type(requests.exceptions.ConnectionError),
-       after=lambda s: click.echo(f'Retrying connection, attempt #{s.attempt_number}'))
-def write_chunks(file, cipher, segment) -> None:
-    """ 
-    Write decrypted chunks to the file.
-    """
-    for chunk in requests.get(segment.absolute_uri, stream=True):
-        file.write(cipher.decrypt(chunk))
+        raise click.Abort(code=0)
 
 
 @click.command()
@@ -176,9 +184,11 @@ def cli(audio_book_url, output_dir, force_overwrite):
         bar_format = 'Downloading segment {n}/{total} [{elapsed}]'
         for segment in tqdm.tqdm(segments, bar_format=bar_format):
             cipher = make_cipher_for_segment(segment)
-            write_chunks(file, cipher, segment)
+            for chunk in http_get(segment.absolute_uri, stream=True):
+                file.write(cipher.decrypt(chunk))
     convert_to_mp3(stream_path)
     click.echo(f'Finished, check the { path } directory.\n')
 
 if __name__ == '__main__':
+    # pylint:disable=no-value-for-parameter
     cli()

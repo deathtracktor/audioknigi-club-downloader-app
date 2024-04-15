@@ -5,9 +5,9 @@ pyinstaller==6.3.0
 pathvalidate==3.2.0
 pycryptodome==3.20.0
 requests==2.31.0
-selenium==4.8.2
+selenium==4.19.0
 selenium-wire==5.1.0
-tenacity==8.2.2
+tenacity==8.2.3
 tqdm==4.65.0
 types-colorama==0.4.15.11
 types-requests==2.29.0.0
