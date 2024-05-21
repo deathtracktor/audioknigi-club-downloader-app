@@ -4,7 +4,7 @@ m3u8==3.4.0
 pyinstaller==6.3.0
 pathvalidate==3.2.0
 pycryptodome==3.20.0
-requests==2.31.0
+requests==2.32.0
 selenium==4.19.0
 selenium-wire==5.1.0
 tenacity==8.2.3
