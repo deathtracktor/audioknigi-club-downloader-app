@@ -18,7 +18,7 @@ import m3u8  # type:ignore[import-untyped]
 import requests
 from pathvalidate import sanitize_filename  # type:ignore
 from selenium.webdriver.firefox.options import Options
-from seleniumwire import webdriver  # type:ignore
+from selenium import webdriver  # type:ignore
 from tenacity import (Retrying, RetryError, retry, retry_if_exception_type,
                       stop_after_attempt, wait_fixed)
 import tqdm
@@ -35,8 +35,9 @@ def get_m3u8_url(browser) -> str:
     """
     Return the first URL containing the `.m3u8` path suffix.
     """
-    urls = (r.url for r in reversed(browser.requests))
-    for url in urls:
+    perf_log = browser.execute_script('return window.performance.getEntries();')
+    for entry in perf_log:
+        url = entry['name']
         if urlparse(url).path.endswith('.m3u8'):
             return url
     raise FileNotFoundError
@@ -68,7 +69,7 @@ def open_browser(url):
         tmp_path = getattr(sys, '_MEIPASS')
         os.environ['PATH'] += os.pathsep + tmp_path
     opt = Options()
-    opt.add_argument('-headless')  # run in a headless mode
+    #opt.add_argument('-headless')  # run in a headless mode
     browser = webdriver.Firefox(options=opt)
     browser.get(url)
     try:

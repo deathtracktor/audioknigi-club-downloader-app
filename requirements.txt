@@ -6,9 +6,6 @@ pathvalidate==3.2.0
 pycryptodome==3.20.0
 requests==2.31.0
 selenium==4.19.0
-# FIXME: `selenium-wire` depends on outdated `blinker` features.
-blinker<1.8.0
-selenium-wire==5.1.0
 tenacity==8.2.3
 tqdm==4.65.0
 types-colorama==0.4.15.11
