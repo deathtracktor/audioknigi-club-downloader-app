@@ -69,7 +69,7 @@ def open_browser(url):
         tmp_path = getattr(sys, '_MEIPASS')
         os.environ['PATH'] += os.pathsep + tmp_path
     opt = Options()
-    #opt.add_argument('-headless')  # run in a headless mode
+    opt.add_argument('-headless')
     browser = webdriver.Firefox(options=opt)
     browser.get(url)
     try:
