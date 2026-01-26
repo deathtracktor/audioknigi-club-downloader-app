@@ -11,7 +11,7 @@ import sys
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Optional
 
 from Crypto.Cipher import AES
 import click
@@ -71,7 +71,9 @@ class Chapter:
         """
         path = Path(prefix) / self.name
         with open(path, mode='wb') as file:
-            for chunk in requests.get(self.segment.absolute_uri, stream=True, timeout=10):
+            for chunk in requests.get(
+                self.segment.absolute_uri, stream=True, timeout=10
+            ):
                 file.write(self.decrypt(chunk))
         return path
 
@@ -96,9 +98,9 @@ def get_m3u8_url(browser) -> str:
 
 
 @contextmanager
-def open_browser(url):
+def open_browser():
     """
-    Open a web page with Selenium.
+    Provide a context manager interfacing the local Firefox browser.
     """
     if getattr(sys, 'frozen', False):
         tmp_path = getattr(sys, '_MEIPASS')
@@ -106,14 +108,27 @@ def open_browser(url):
     opt = Options()
     opt.add_argument('-headless')
     browser = webdriver.Firefox(options=opt)
-    browser.get(url)
     try:
         yield browser
     finally:
         browser.close()
 
 
-def get_signed_playlist_url(url: str) -> str:
+@contextmanager
+def open_remote(remote_addr: str):
+    """
+    Provide a context manager interfacing the remote Selenium hub.
+    """
+    opt = Options()
+    opt.add_argument('-headless')
+    browser = webdriver.Remote(command_executor=remote_addr, options=opt)
+    try:
+        yield browser
+    finally:
+        browser.close()
+
+
+def get_signed_playlist_url(browser_opener, url: str) -> str:
     """
     Open book page in the browser, get the signed playlist URL.
     """
@@ -122,11 +137,12 @@ def get_signed_playlist_url(url: str) -> str:
         'wait': wait_fixed(5),
         'retry': retry_if_exception_type(FileNotFoundError),
     }
-    with open_browser(url) as browser:
+    with browser_opener as browser:
+        browser.get(url)
         for retry_no, attempt in enumerate(Retrying(**retry_opt), start=1):
             with attempt, suppress(RetryError):
                 return get_m3u8_url(browser)
-            click.echo(f'Waiting for playlist [{ retry_no }]')
+        click.echo(f'Waiting for playlist [{ retry_no }]')
     raise click.Abort('Failed to fetch playlist.')
 
 
@@ -186,21 +202,28 @@ def confirm_overwrite(overwrite: bool, path: Path) -> None:
 @click.command(context_settings={'show_default': True})
 @click.argument('audio_book_url')
 @click.option(
-    '-o',
-    '--output-dir',
-    'output_dir',
-    default=None,
+    '-o', '--output-dir', 'output_dir', default='./downloads',
     help='Path to download directory',
 )
 @click.option(
-    '-y',
-    '--yes',
-    'force_overwrite',
-    is_flag=True,
+    '-y', '--yes', 'force_overwrite', is_flag=True,
     help='Overwrite existing files without a prompt',
 )
-@click.option('-c', '--concurrency', type=int, default=8, help='Download segments concurrently')
-def cli(audio_book_url: str, output_dir: str, force_overwrite: bool, concurrency: int):
+@click.option(
+    '-c', '--concurrency', type=int, default=8,
+    help='Download segments concurrently',
+)
+@click.option(
+    '-r', '--remote', default=None,
+    help='URL of a remote Selenium hub, must include port number.',
+)
+def cli(
+    audio_book_url: str,
+    output_dir: str,
+    force_overwrite: bool,
+    concurrency: int,
+    remote: Optional[str],
+):
     """
     Download the complete book.
     """
@@ -208,17 +231,14 @@ def cli(audio_book_url: str, output_dir: str, force_overwrite: bool, concurrency
     path = get_or_create_output_dir(output_dir, book_title)
     confirm_overwrite(force_overwrite, path)
     click.secho('Fetching book metadata, please stand by...', fg='green')
-    playlist_url = get_signed_playlist_url(audio_book_url)
+    browser = open_remote(remote) if remote else open_browser()
+    playlist_url = get_signed_playlist_url(browser, audio_book_url)
     segments = m3u8.load(playlist_url).segments
     with (
         TemporaryDirectory() as tmp_path,
         open((path / book_title).with_suffix('.ts'), mode='wb') as merged,
     ):
-        keys = (
-            Stream(segments)
-            .map(get_key, concurrency=concurrency)
-            .observe('keys')
-        )
+        keys = Stream(segments).map(get_key, concurrency=concurrency).observe('keys')
         segments = (
             Stream(zip(segments, keys))
             .map(star(lambda seg, key: Chapter(segment=seg, key=key)))
