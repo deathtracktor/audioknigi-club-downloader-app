@@ -29,13 +29,13 @@ $ source .venv/bin/activate
 * Download and install [ffmpeg](https://ffmpeg.org/) (optional);
 * Run the app:
 ```sh
-cd src
-scripts\python app.py
+$ cd src
+$ scripts\python app.py
 ```
 * Or build a single-file executable:
 ```sh
-cd src
-pyinstaller app.spec
+$ cd src
+$ pyinstaller app.spec
 ```
 
 ## Installation (Docker/Podman)
@@ -45,11 +45,11 @@ Docker Compose environment, which also works with Podman Compose.
 
 * Build container images (should only be done once):
   ```sh
-  docker compose build
+  $ docker compose build
   ```
 * Run the app:
   ```sh
-  docker compose run --rm -it downloader <book URL>
+  $ docker compose run --rm -it downloader <book URL>
   ```
 The book will be downloaded into the local `downloads` directory and automatically
 converted to MP3 format.
