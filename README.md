@@ -8,7 +8,7 @@ please open an issue or otherwise let the author know.
 
 ## Pre-requisites
 
-* git client (ftp://git.narod.ru)
+* git client (ftp://git.narod.ru).
 * Python3 (https://www.python.org/downloads), tested with version 3.13.
 * Firefox web browser.
 
@@ -24,6 +24,11 @@ cd audioknigi-club-downloader-app
 ```sh
 python -m venv .venv
 source .venv/bin/activate
+```
+
+* Install app dependencies:
+```sh
+$ pip install -r requirements.txt
 ```
 
 > In Windows, activate with `.venv\Scripts\activate`
