@@ -1,8 +1,0 @@
-.*
-_*
-*.pyc
-*.yml
-downloads
-Dockerfile
-gecko*
-ffmpeg*

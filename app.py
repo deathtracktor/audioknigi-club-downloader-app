@@ -1,100 +1,21 @@
 """
-Download complete audio books from audioknigi.ru
+Download MP3 audio books from akniga.club and alike.
 """
 
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass
-from functools import cache, cached_property
-from pathlib import Path, PurePosixPath
-import os
-import sys
-from tempfile import TemporaryDirectory
+from pathlib import Path
+import shutil
 from urllib.parse import urlparse
+from tempfile import NamedTemporaryFile
+from typing import Any, Iterator
 
-from typing import Callable, Mapping, Optional
-
-from Crypto.Cipher import AES
 import click
-import ffmpeg  # type:ignore[import-untyped]
-import m3u8  # type:ignore[import-untyped]
-import requests
-from pathvalidate import sanitize_filename  # type:ignore
+import httpx
+from selenium import webdriver
+from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
-from selenium import webdriver  # type:ignore
-from streamable import Stream, star
-from tenacity import (
-    Retrying,
-    RetryError,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_fixed,
-)
-
-
-@dataclass
-class Chapter:
-    """
-    A downladable, decrypted book chapter.
-    """
-
-    segment: m3u8.Segment
-    key: bytes
-
-    @property
-    def name(self) -> str:
-        """
-        Return the chapter's file name.
-        """
-        path = urlparse(self.segment.absolute_uri).path
-        return PurePosixPath(path).name
-
-    @cached_property
-    def decrypt(self) -> Callable[[bytes], bytes]:
-        """
-        Return an AES decryptor function for the chapter.
-        """
-        iv = bytes.fromhex(self.segment.key.iv.lstrip('0x'))
-        return AES.new(self.key, AES.MODE_CBC, IV=iv).decrypt
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_fixed(3),
-        retry=retry_if_exception_type(requests.exceptions.ConnectionError),
-        after=lambda s: click.echo(
-            f'Waiting for server response [{ s.attempt_number }]'
-        ),
-    )
-    def download(self, prefix: str) -> Path:
-        """
-        Download the chapter, decrypt and save to the specified path.
-        """
-        path = Path(prefix) / self.name
-        with open(path, mode='wb') as file:
-            for chunk in requests.get(
-                self.segment.absolute_uri, stream=True, timeout=10
-            ):
-                file.write(self.decrypt(chunk))
-        return path
-
-
-def get_book_title(url: str) -> str:
-    """
-    Extract the audiobook name from its URL.
-    """
-    return sanitize_filename(url.split('/')[-1])
-
-
-def get_m3u8_url(browser) -> str:
-    """
-    Return the first URL containing the `.m3u8` path suffix.
-    """
-    perf_log = browser.execute_script('return window.performance.getEntries();')
-    for entry in perf_log:
-        url = entry['name']
-        if urlparse(url).path.endswith('.m3u8'):
-            return url
-    raise FileNotFoundError
+from slugify import slugify
 
 
 @contextmanager
@@ -102,9 +23,6 @@ def open_browser():
     """
     Provide a context manager interfacing the local Firefox browser.
     """
-    if getattr(sys, 'frozen', False):
-        tmp_path = getattr(sys, '_MEIPASS')
-        os.environ['PATH'] += os.pathsep + tmp_path
     opt = Options()
     opt.add_argument('-headless')
     browser = webdriver.Firefox(options=opt)
@@ -114,146 +32,69 @@ def open_browser():
         browser.close()
 
 
-@contextmanager
-def open_remote(remote_addr: str):
+@dataclass
+class Chunk:
     """
-    Provide a context manager interfacing the remote Selenium hub.
+    Download chunk and it's metadata.
     """
-    opt = Options()
-    opt.add_argument('-headless')
-    browser = webdriver.Remote(command_executor=remote_addr, options=opt)
-    try:
-        yield browser
-    finally:
-        browser.close()
+
+    size: int
+    total: int
+    content: bytes
 
 
-def get_signed_playlist_url(browser_opener, url: str) -> str:
+def download(url: str, user_agent: str, cookies: dict) -> Iterator[Chunk]:
     """
-    Open book page in the browser, get the signed playlist URL.
+    Initiate a streaming GET request to the given URL, emit `Chunk` objects.
     """
-    retry_opt: Mapping = {
-        'stop': stop_after_attempt(20),
-        'wait': wait_fixed(5),
-        'retry': retry_if_exception_type(FileNotFoundError),
-    }
-    with browser_opener as browser:
-        browser.get(url)
-        for retry_no, attempt in enumerate(Retrying(**retry_opt), start=1):
-            with attempt, suppress(RetryError):
-                return get_m3u8_url(browser)
-        click.echo(f'Waiting for playlist [{ retry_no }]')
-    raise click.Abort('Failed to fetch playlist.')
+    kwargs: dict[str, Any] = {'headers': {'User-Agent': user_agent}, 'cookies': cookies}
+    with httpx.stream('GET', url, **kwargs) as resp:
+        total = int(resp.headers['Content-Length'])
+        yield Chunk(total=total, size=0, content=b'')
+        for chunk in resp.iter_bytes():
+            yield Chunk(total=total, size=len(chunk), content=chunk)
 
 
-def get_or_create_output_dir(dirname: str, book_title: str) -> Path:
+def make_file_path(prefix: Path, book_url: str) -> str:
     """
-    Create or reuse output directory in a fail-safe manner.
+    Make a safe file name, prepended with the `prefix` directory.
     """
-    dirs = (dirname, book_title, str(Path.cwd()))
-    path = Path(next(filter(bool, dirs))).resolve()
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
-        # pylint:disable=raise-missing-from
-        raise click.BadParameter(f'"{ path }" is not a directory.')
-    return path
+    file_name = slugify(urlparse(book_url).path, allow_unicode=False)
+    return str(prefix / Path(file_name).with_suffix('.mp3'))
 
 
-@cache
-def get_key(segment: m3u8.Segment) -> bytes:
-    """
-    Download decryption key for the segment.
-    """
-    resp = requests.get(segment.key.absolute_uri, timeout=10)
-    if resp.status_code != 200:
-        raise click.Abort('Could not fetch decryption key.')
-    return resp.content
-
-
-def convert_to_mp3(stream_path: str) -> None:
-    """
-    Attempt to convert .ts file to .mp3 with `ffmpeg`.
-    """
-    ts_path = Path(stream_path)
-    mp3_path = ts_path.with_suffix('.mp3')
-    try:
-        ffmpeg.input(str(ts_path)).output(str(mp3_path)).run()
-    except FileNotFoundError:
-        click.secho(
-            "Warning: `ffmpeg` is not installed, won't convert to MP3.", fg='magenta'
-        )
-    else:
-        ts_path.unlink()
-
-
-def confirm_overwrite(overwrite: bool, path: Path) -> None:
-    """
-    Confirm overwriting of non-empty target directories.
-    """
-    if overwrite:
-        return
-    for _ in path.iterdir():
-        if click.confirm(f'The directory "{ path }" is not empty. Overwrite?'):
-            return
-        raise click.Abort('Terminated.')
-
-
-@click.command(context_settings={'show_default': True})
-@click.argument('audio_book_url')
+@click.command
+@click.argument('BOOK_URL')
 @click.option(
-    '-o', '--output-dir', 'output_dir', default='./downloads',
-    help='Path to download directory',
+    '--output-dir',
+    type=click.Path(path_type=Path, exists=True, file_okay=False),
+    default=Path.cwd(),
+    help='Output directory.',
 )
-@click.option(
-    '-y', '--yes', 'force_overwrite', is_flag=True,
-    help='Overwrite existing files without a prompt',
-)
-@click.option(
-    '-c', '--concurrency', type=int, default=8,
-    help='Download segments concurrently',
-)
-@click.option(
-    '-r', '--remote', default=None,
-    help='URL of a remote Selenium hub, must include port number.',
-)
-def cli(
-    audio_book_url: str,
-    output_dir: str,
-    force_overwrite: bool,
-    concurrency: int,
-    remote: Optional[str],
-):
+def cli(book_url: str, output_dir: Path):
     """
-    Download the complete book.
+    Download an audiobook from the given URL.
     """
-    book_title = get_book_title(audio_book_url)
-    path = get_or_create_output_dir(output_dir, book_title)
-    confirm_overwrite(force_overwrite, path)
-    click.secho('Fetching book metadata, please stand by...', fg='green')
-    browser = open_remote(remote) if remote else open_browser()
-    playlist_url = get_signed_playlist_url(browser, audio_book_url)
-    segments = m3u8.load(playlist_url).segments
-    with (
-        TemporaryDirectory() as tmp_path,
-        open((path / book_title).with_suffix('.ts'), mode='wb') as merged,
-    ):
-        keys = Stream(segments).map(get_key, concurrency=concurrency).observe('keys')
-        segments = (
-            Stream(zip(segments, keys))
-            .map(star(lambda seg, key: Chapter(segment=seg, key=key)))
-            .map(lambda c: c.download(prefix=tmp_path), concurrency=concurrency)
-            .observe('segments')
-            .map(lambda file: file.read_bytes())
-            .foreach(merged.write)
-            .observe('files')
-        )
-        click.secho('Downloading segments...', fg='yellow')
-        segments.count()
-    convert_to_mp3(merged.name)
-    click.secho(f'Finished, check the { path } directory.\n', fg='green')
+    click.secho('Fetching book metadata, please stand by...', fg='yellow', bold=True)
+    with open_browser() as browser:
+        browser.get(book_url)
+        player = browser.find_element(By.XPATH, '//audio[@preload="none"]')
+        audio_url = player.get_attribute('src')
+        cookies = {c['name']: c['value'] for c in browser.get_cookies()}
+        user_agent = browser.execute_script('return navigator.userAgent;')
+        chunks = download(audio_url, user_agent, cookies)
+        click.echo('Downloading audio...')
+        with (
+            click.progressbar(length=next(chunks).total) as progress,
+            NamedTemporaryFile(mode='wb', delete=False) as tmpfile,
+        ):
+            for chunk in chunks:
+                tmpfile.write(chunk.content)
+                progress.update(chunk.size)
+        path = make_file_path(output_dir, book_url)
+        shutil.move(tmpfile.name, path)
+        click.secho(f'Saved to "{path}".', fg='green', bold=True)
 
 
 if __name__ == '__main__':
-    # pylint:disable=no-value-for-parameter
     cli()

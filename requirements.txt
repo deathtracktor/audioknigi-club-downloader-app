@@ -1,10 +1,4 @@
-click==8.0.1
-ffmpeg-python==0.2.0
-m3u8==6.0.0
-pyinstaller==6.11.1
-pathvalidate==3.2.0
-pycryptodome==3.20.0
-requests==2.31.0
-selenium==4.19.0
-streamable==1.4.7
-tenacity==8.2.3
+click==8.4.2
+httpx==0.28.1
+python-slugify==8.0.4
+selenium==4.46.0

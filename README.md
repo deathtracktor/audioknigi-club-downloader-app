@@ -1,57 +1,54 @@
-Download multi-part audio books from Audioknigi.club
-----------------------------------------------------
+Download audiobooks from akniga.org (former Audioknigi.club)
+============================================================
+
+This application downloads audiobooks in MP3 format from akniga.org.
+The site periodically changes how audio files are served, which may cause
+the downloader to stop working or malfunction. If you encounter this issue,
+please open an issue or otherwise let the author know.
 
 ## Pre-requisites
 
-* Python3 (https://www.python.org/downloads)
-* pip (https://pip.pypa.io/en/stable/installing/)
-* virtualenv (https://pypi.python.org/pypi/virtualenv)
 * git client (ftp://git.narod.ru)
+* Python3 (https://www.python.org/downloads), tested with version 3.13.
 * Firefox web browser.
 
-## Installation (Windows)
+## Installation
 
-* Create a virtual environment, clone the code:
+* Clone the code:
 ```sh
-$ git clone https://github.com/deathtracktor/audioknigi-club-downloader-app.git src
-$ cd audioknigi-club-downloader-app
-$ python -m venv .venv
+git clone https://github.com/deathtracktor/audioknigi-club-downloader-app.git
+cd audioknigi-club-downloader-app
 ```
 
-* Activate virtual environment, install dependencies:
+* Create and activate a virtual envrionment:
 ```sh
-$ source .venv/bin/activate
-# Windows
-> .venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate
 ```
+
+> In Windows, activate with `.venv\Scripts\activate`
+
 * Make sure you have the recent version of Firefox installed;
-* Download [Geckodriver](https://github.com/mozilla/geckodriver/releases), extract to your current working directory;
-* Download and install [ffmpeg](https://ffmpeg.org/) (optional);
-* Run the app:
+* Download [Geckodriver](https://github.com/mozilla/geckodriver/releases),
+  extract to your current working directory;
+
+* Print app help:
 ```sh
-$ cd src
-$ scripts\python app.py
-```
-* Or build a single-file executable:
+$ python app.py --help
+````
+
+### Downloading process
+
+The following command will download a book from the provided URL to the current
+working directory:
+
 ```sh
-$ cd src
-$ pyinstaller app.spec
+python app.py https://akniga.org/<path-to-book>
 ```
 
-## Installation (Docker/Podman)
-
-To avoid installing bulky dependencies locally, you can use the provided
-Docker Compose environment, which also works with Podman Compose.
-
-* Build container images (should only be done once):
-  ```sh
-  $ docker compose build
-  ```
-* Run the app:
-  ```sh
-  $ docker compose run --rm -it downloader <book URL>
-  ```
-The book will be downloaded into the local `downloads` directory and automatically
-converted to MP3 format.
+You can also specify the output directory as shown:
+```sh
+python app.py --output-dir=<some local path> https://akniga.org/<path-to-book>
+```
 
 ## Enjoy!
